@@ -1,12 +1,19 @@
+#if USE_SDL
 #include <SDL2/SDL.h>
+#endif
+
+#include <math.h>
 #include <vector>
+#include <errno.h>
 
 const int SCREEN_WIDTH = 320;
 const int SCREEN_HEIGHT = 240;
 
+#if USE_SDL
 SDL_Window *window = NULL;
 SDL_Renderer *renderer = NULL;
 SDL_Surface *screen = NULL;
+#endif
 
 enum Mode { Server, Client };
 Mode mode = Client;
@@ -40,6 +47,7 @@ static const int TIMER_INTERVAL_MS = 16;
 char err[ANET_ERR_LEN];
 
 bool init() {
+#if USE_SDL
   if (SDL_Init(SDL_INIT_VIDEO) < 0) {
     return false;
   }
@@ -53,14 +61,21 @@ bool init() {
     return false;
   }
   return true;
+#else
+  return true;
+#endif
 }
 
 bool quit() {
+#if USE_SDL
   if (window) {
     SDL_DestroyWindow(window);
   }
   SDL_Quit();
   return true;
+#else
+  return true;
+#endif
 }
 
 void UpdateShip(Ship *pShip, float dt) {
@@ -96,6 +111,7 @@ void UpdateShip(Ship *pShip, float dt) {
 }
 
 void RenderShip(Ship *pShip) {
+#if USE_SDL
   float SHIP_D = 10.f;
   SDL_Rect rect;
   rect.x = pShip->x - SHIP_D / 2;
@@ -108,6 +124,7 @@ void RenderShip(Ship *pShip) {
   SDL_RenderDrawLine(renderer, pShip->x, pShip->y,
                      pShip->x + cos(pShip->a) * 20.f,
                      pShip->y + sin(pShip->a) * 20.f);
+#endif
 }
 
 void serverSocketProc(aeEventLoop *eventLoop, int fd, void *clientData,
@@ -183,14 +200,16 @@ void listenProc(aeEventLoop *eventLoop, int fd, void *clientData, int mask) {
   ships.push_back(pShip);
   if (aeCreateFileEvent(eventLoop, sock, AE_READABLE, serverSocketProc,
                         pShip) == AE_ERR) {
-    printf("failed to create file event\n");
+    printf("failed to create file event %d\n", errno);
+    ships.erase(ships.end() - 1);
     return;
   }
 }
 
 int timeProc(aeEventLoop *eventLoop, long long id, void *clientData) {
-  SDL_Event e;
   {
+#if USE_SDL
+    SDL_Event e;
     bool bRight = false;
     bool bLeft = false;
     while (SDL_PollEvent(&e) != 0) {
@@ -212,6 +231,7 @@ int timeProc(aeEventLoop *eventLoop, long long id, void *clientData) {
         aeStop(eventLoop);
       }
     }
+#endif
     if (mode == Server) {
       // create state buffer
       char buf[10240];
@@ -235,19 +255,24 @@ int timeProc(aeEventLoop *eventLoop, long long id, void *clientData) {
       }
     }
 
+    for (int i = 0; i < ships.size(); i++) {
+      UpdateShip(ships[i], TIMER_INTERVAL_MS * 0.001f);
+    }
+#if USE_SDL
     SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0x00);
     SDL_RenderClear(renderer);
     for (int i = 0; i < ships.size(); i++) {
-      UpdateShip(ships[i], 0.016f);
       RenderShip(ships[i]);
     }
     SDL_RenderPresent(renderer);
+#endif
   }
 
   return TIMER_INTERVAL_MS;
 }
 
 int main(int argc, char *argv[]) {
+
   if (!init()) {
     return 1;
   }
@@ -255,7 +280,7 @@ int main(int argc, char *argv[]) {
     mode = Server;
   }
 
-  int setsize = 10;
+  int setsize = 1024;
   aeEventLoop *eventLoop = aeCreateEventLoop(setsize);
 
   ClientData client;
